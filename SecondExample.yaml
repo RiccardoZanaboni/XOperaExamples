@@ -1,0 +1,47 @@
+tosca_definitions_version: tosca_simple_yaml_1_3
+
+description: Template for deploying a single server with predefined properties.
+
+node_types:
+  tosca.nodes.DBMS.MySQL:
+    derived_from: tosca.nodes.DBMS
+    properties:
+      port:
+        description: reflect the default MySQL server port
+        default: 3306
+        type: integer
+      root_password:
+        required: true
+        type: string
+
+topology_template:
+  node_templates:
+    db_server:
+      type: tosca.nodes.Compute
+      attributes:
+        private_address: localhost
+        public_address: localhost
+      capabilities:
+        # Host container properties
+        host:
+         properties:
+           num_cpus: 1
+           disk_size: 10 GB
+           mem_size: 4096 MB
+        # Guest Operating System properties
+        os:
+          properties:
+            # host Operating System image properties
+            architecture: x86_64
+            type: linux
+            distribution: rhel
+            version: 6.5
+
+    mysql:
+      type: tosca.nodes.DBMS.MySQL
+      properties:
+        root_password: { get_input: mysql_rootpw }
+        port: { get_input: mysql_port }
+      requirements:
+        - host: db_server
+
