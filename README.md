@@ -1,5 +1,5 @@
 # XOperaExamples
-XOpera and Tosca Examples
+XOpera + Tosca Examples
 ## First Example
 In FirstExample.yaml there is a simple **Compute** 
 node ,called *db_server*, in which are declared some host properties that are built into this node definition.
