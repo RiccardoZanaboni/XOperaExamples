@@ -9,15 +9,15 @@
   },
   "state": {
     "is_set": true,
-    "data": "initial"
+    "data": "started"
   },
   "private_address": {
-    "is_set": false,
-    "data": null
+    "is_set": true,
+    "data": "localhost"
   },
   "public_address": {
-    "is_set": false,
-    "data": null
+    "is_set": true,
+    "data": "localhost"
   },
   "networks": {
     "is_set": false,
