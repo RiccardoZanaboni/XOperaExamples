@@ -1,0 +1,122 @@
+tosca_definitions_version: tosca_simple_yaml_1_3
+
+description: Template for deploying a single server with predefined properties.
+
+node_types:
+  tosca.nodes.DBMS.MySQL:
+    derived_from: tosca.nodes.DBMS
+    properties:
+      port:
+        description: reflect the default MySQL server port
+        default: 3306
+        type: integer
+      root_password:
+        required: true
+        type: string
+
+  tosca.nodes.WebServer.Apache:
+    derived_from: tosca.nodes.WebServer
+
+  tosca.nodes.WebApplication.WordPress:
+    derived_from: tosca.nodes.WebApplication
+    properties:
+      admin_user:
+        type: string
+      admin_password:
+        type: string
+      db_host:
+        type: string
+    requirements:
+      - database_endpoint:
+        capability: tosca.capabilities.Endpoint.Database
+        node: tosca.nodes.Database
+        relationship: tosca.relationships.ConnectsTo
+
+topology_template:
+
+  inputs:
+    # Admin user name and password to use with the WordPress application
+    wordpress_db_name:
+      type: string
+    wordpress_db_user:
+      type: string
+    wordpress_db_password:
+      type: string
+    wp_admin_username:
+      type: string
+    wp_admin_password:
+      type: string
+    mysql_root_password:
+      type: string
+    context_root:
+      type: string
+
+  node_templates:
+
+    db_server:
+      type: tosca.nodes.Compute
+      attributes:
+        private_address: localhost
+        public_address: localhost
+      capabilities:
+        # Host container properties
+        host:
+         properties:
+           num_cpus: 1
+           disk_size: 10 GB
+           mem_size: 4096 MB
+        # Guest Operating System properties
+        os:
+          properties:
+            # host Operating System image properties
+            architecture: x86_64
+            type: linux
+            distribution: rhel
+            version: 6.5
+
+    mysql:
+      type: tosca.nodes.DBMS.MySQL
+      properties:
+        root_password: { get_input: mysql_rootpw }
+        port: { get_input: mysql_port }
+      requirements:
+        - host: db_server
+
+    wordpress_db:
+      type: tosca.nodes.Database.MySQL
+      properties:
+        name: { get_input: wordpress_db_name }
+        user: { get_input: wordpress_db_user }
+        password: { get_input: wordpress_db_password }
+      requirements:
+        - host: mysql
+
+
+
+    web_server:
+      type: tosca.nodes.Compute
+      # rest omitted here for brevity
+
+    apache:
+      type: tosca.nodes.WebServer.Apache
+      requirements:
+        - host: web_server
+
+    wordpress:
+      type: tosca.nodes.WebApplication.WordPress
+      properties:
+        context_root: { get_input: context_root }
+        admin_user: { get_input: wp_admin_username }
+        admin_password: { get_input: wp_admin_password }
+        db_host: { get_attribute: [ db_server, private_address ] }
+      requirements:
+        - host: apache
+        - database_endpoint: wordpress_db
+      interfaces:
+        Standard:
+          inputs:
+            db_host: { get_attribute: [ db_server, private_address ] }
+            db_port: { get_property: [ mysql, port ] }
+            db_name: { get_property: [ wordpress_db, name ] }
+            db_user: { get_property: [ wordpress_db, user ] }
+            db_password: { get_property: [ wordpress_db, password ] }
