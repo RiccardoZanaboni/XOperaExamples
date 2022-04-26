@@ -1,7 +1,3 @@
-wp_admin_username: <wp_admin_username>
-wp_admin_password: <wp_admin_password>
-mysql_root_password: <mysql_root_password>
-context_root: <context_root>
 wordpress_db_name: <wordpress_db_name>
 wordpress_db_user: <wordpress_db_user>
 wordpress_db_password: <wordpress_db_password>
