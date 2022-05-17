@@ -20,6 +20,8 @@ In ThirdExample.yaml a **Database.MySql** node template is added. This represent
 FourthExample.yaml defines a web application stack hosted on the web_server **Compute** node and the database software stack of previous examples.
 The example can be well represented with this image:
 
+![alt text](https://github.com/RiccardoZanaboni/XOperaExamples/blob/main/FourtExample.PNG)
+
 
 The web application stack consists of the **wordpress**, the **apache** and the
 **web_server** node templates. The wordpress node template represents a custom web application of type
