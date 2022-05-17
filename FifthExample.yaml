@@ -1,0 +1,59 @@
+tosca_definitions_version: tosca_simple_yaml_1_3
+
+imports:
+  - modules/docker/docker_host.yaml
+  - modules/docker/docker_network.yaml
+  - modules/docker/docker_registry.yaml
+  - modules/docker/docker_component.yaml
+
+topology_template:
+
+  node_templates:
+    my-workstation:
+      type: tosca.nodes.Compute
+      attributes:
+        private_address: localhost
+        public_address: localhost
+
+    # Docker images shall be pulled from public registry
+    docker-public-registry:
+      type: sodalite.nodes.DockerRegistry
+      properties:
+        docker_registry_url: registry.hub.docker.com
+      requirements:
+        - host: my-workstation
+
+    db:
+      type: sodalite.nodes.DockerizedComponent
+      properties:
+        alias: db
+        docker_network_name: { get_property: [ SELF, network, name ] }
+        image_name: richizana/sql_schema
+        restart_policy: always
+        ports: [ "3306:3306" ]
+        env:
+          MYSQL_ROOT_PASSWORD: fraternali
+          MYSQL_DATABASE: db_gestione_spese
+          MYSQL_USER: piero
+          MYSQL_PASSWORD: fraternali
+      requirements:
+        - host: my-workstation
+        - registry: docker-public-registry
+
+      # WEB APP
+    web-app:
+      type: sodalite.nodes.DockerizedComponent
+      properties:
+        alias: WebApp
+        docker_network_name: { get_property: [ SELF, network, name ] }
+        image_name: richizana/first_repo
+        restart_policy: always
+        ports: [ "8080:8080" ]
+        env:
+          MYSQL_DB_HOST: db:3306
+          MYSQL_DB_USER: piero
+          MYSQL_DB_PASSWORD: fraternali
+      requirements:
+        - host: my-workstation
+        - dependency: db
+        - registry: docker-public-registry

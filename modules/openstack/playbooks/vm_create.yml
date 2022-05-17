@@ -1,0 +1,213 @@
+---
+- name: Refresh token and update env
+  import_playbook: egi_refresh_token.yml
+  when: env.checkin_env is defined
+
+- hosts: all
+  gather_facts: no
+  vars:
+    exporter_meta:
+      prometheus_io_scrape: "true"
+      prometheus_io_port: "9100"
+  tasks:
+    - set_fact:
+        os_env: "{{ env.os_env }}"
+      when: env.os_env is defined
+
+    - set_fact:
+        additional_ssh_args: "{{ '-o ' +
+                                ssh_config.keys()|
+                                zip(ssh_config.values())|
+                                map('join', '=')|
+                                join(' -o ') }}"
+      when: ssh_config is defined and ssh_config != None and ssh_config | length > 0
+
+    - name: Create VM
+      os_server:
+        state: present
+        name: "{{ vm_name }}"
+        image: "{{ image }}"
+        key_name: "{{ key_name }}"
+        flavor: "{{ flavor }}"
+        network: "{{ network }}"
+        security_groups: "{{ security_groups }}"
+        timeout: "{{ timeout }}"
+        floating_ip_pools: "{{ floating_ip_pools }}"
+        meta: "{{ exporter_meta if (include_exporter is defined and include_exporter == True) else {} }}"
+        userdata: "{{ userdata }}"
+      register: server_info
+      environment: "{{ os_env if os_env is defined }}"
+
+    - name: Ensure VM is started
+      os_server_action:
+        action: start
+        server: "{{ vm_name }}"
+      environment: "{{ os_env if os_env is defined }}"
+
+    - name: Set attributes
+      set_stats:
+        data:
+          private_address: "{{ server_info.server.private_v4 }}"
+          public_address: "{{ server_info.server.public_v4 }}"
+          id: "{{ server_info.server.id }}"
+
+    - name: Create temporary inventory for ssh wait
+      add_host:
+        name: server
+        groups: vms
+        ansible_host: "{{ server_info.server.public_v4 }}"
+        ansible_user: "{{ ansible_user }}"
+        ansible_ssh_common_args: >
+          -o IdentitiesOnly=yes
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=no
+          {{ additional_ssh_args | default("") }}
+        id: "{{ server_info.server.id }}"
+        public_address: "{{ server_info.server.public_v4 }}"
+
+
+- hosts: vms
+  gather_facts: no
+  vars:
+    public_address: "{{ hostvars.server.public_address }}"
+    id: "{{ hostvars.server.id }}"
+
+  tasks:
+    - name: Wait for ssh to wake up
+      wait_for_connection:
+      environment: "{{ os_env if os_env is defined }}"
+
+    - name: Add user SSH key to authorized
+      authorized_key:
+        user: "{{ ansible_user }}"
+        state: present
+        key: "{{ additional_public_key }}"
+      when:
+        - additional_public_key != None
+        - additional_public_key != ""
+
+    - name: Check that the node_exporter.service exists
+      stat:
+        path: /etc/systemd/system/node_exporter.service
+      register: stat_result
+
+    - name: Add the user "node_exporter"
+      become: yes
+      user:
+        name: "node_exporter"
+        shell: "/bin/bash"
+        create_home: no
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Download Node exporter
+      become: yes
+      get_url:
+        url: "https://github.com/SODALITE-EU/node_exporter/releases/download/v1.2.0/node_exporter-1.2.0.linux-amd64.tar.gz"
+        dest: /tmp
+        checksum: "sha256:fc8a1e891a5fd4b52ecc006f440ab39d15ad9c581cc0a6ff6ded15884c4eaebf"
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Extract Node exporter
+      become: yes
+      unarchive:
+        src: "/tmp/node_exporter-1.2.0.linux-amd64.tar.gz"
+        dest: "/tmp"
+        remote_src: true
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Copy executable
+      become: yes
+      copy:
+        src: "/tmp/node_exporter"
+        dest: "/usr/local/bin"
+        remote_src: true
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Give the user "node_exporter" permission to that binary
+      become: yes
+      file:
+        path: "/usr/local/bin/node_exporter"
+        owner: "node_exporter"
+        group: "node_exporter"
+        mode: "0755"
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Delete compressed download
+      become: yes
+      file:
+        path: "/tmp/node_exporter-1.2.0.linux-amd64.tar.gz"
+        state: absent
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Delete node exporter in tmp
+      become: yes
+      file:
+        path: "/tmp/node_exporter"
+        state: absent
+      when:
+        - not stat_result.stat.exists
+        - include_exporter
+
+    - name: Create Node exporter Service File
+      become: yes
+      template:
+        src: "node_exporter.service.j2"
+        dest: "/etc/systemd/system/node_exporter.service"
+        owner: "node_exporter"
+        group: "node_exporter"
+        mode: "0755"
+      when: include_exporter
+
+    - name: systemd reload
+      become: yes
+      systemd:
+        daemon_reload: yes
+      when: include_exporter
+
+    - name: Start Node exporter service
+      become: yes
+      service:
+        name: node_exporter
+        enabled: yes
+        state: started
+      when: include_exporter
+
+    - name: Register node-exporter in Consul server
+      uri:
+        url: "{{ consul_server_address|quote }}/v1/agent/service/register"
+        method: PUT
+        body:
+          Name: "consul-registered-node-exporters"
+          ID: "{{ monitoring_id }}-{{ id }}"
+          Address: "{{ public_address }}"
+          Port: 9100
+        body_format: json
+      when:
+        - consul_server_address != ""
+        - include_exporter
+
+    - name: Download Skydive binary
+      shell:
+        "curl -Lo - https://github.com/skydive-project/skydive-binaries/raw/jenkins-builds/skydive-latest.gz | gzip -d > skydive && chmod +x skydive && sudo mv skydive /usr/local/bin/"
+      args:
+        chdir: "/tmp"
+      when: include_exporter
+
+    - name: Run the skydive agent
+      shell: SKYDIVE_ANALYZERS="{{skydive_analyzer}}" SKYDIVE_AGENT_TOPOLOGY_PROBES="lldp libvirt docker runc socketinfo" nohup sudo -E /usr/local/bin/skydive agent &
+      when: skydive_analyzer != ""
+      args:
+        chdir: "/tmp"
+      when: include_exporter

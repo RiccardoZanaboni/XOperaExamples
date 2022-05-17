@@ -1,0 +1,95 @@
+---
+- hosts: all
+  become_user: root
+  become: yes
+
+  vars:
+    centos7: "{{ ansible_distribution == 'CentOS' and ansible_distribution_major_version == '7' }}"
+    pip_install_packages:
+      - name: pip
+        state: latest
+      - name: cryptography
+
+  pre_tasks:
+    - name: Set vars for Cent OS backward compatibility
+      set_fact:
+        pip_package: python-pip
+        pip_install_packages:
+          - name: cryptography
+            version: "3.3"
+      when: centos7
+
+  tasks:
+    - set_fact:
+        alt_name: "IP:{{ public_ipv4_address }}"
+      when: public_ipv4_address != "localhost"
+    - set_fact:
+        alt_name: "URI:{{ public_ipv4_address }}"
+      when: public_ipv4_address == "localhost"
+    
+    - set_fact:
+        cert_path: "/etc/docker/certs.d/{{ registry_ip }}"
+
+    - name: Create fresh certs folder
+      block:
+        - file:
+            path: "{{ cert_path }}"
+            state: absent
+        - file:
+            path: "{{ cert_path }}"
+            state: directory
+
+    - name: Copy root CA files
+      block:
+        - copy:
+            src: ca.crt
+            dest: "{{ cert_path }}/ca.crt"
+        - copy:
+            src: ca.key
+            dest: "{{ cert_path }}/ca.key"
+
+    - name: Install root CA
+      block:
+        - command: "cp {{ cert_path }}/ca.crt /etc/pki/ca-trust/source/anchors/ca.crt"
+        - command: update-ca-trust
+      when: ansible_distribution == "CentOS" and ansible_distribution_major_version == "7"
+
+    - name: Install root CA
+      block:
+        - file:
+            path: "/usr/local/share/ca-certificates/opera"
+            state: directory
+        - command: "cp {{ cert_path }}/ca.crt /usr/local/share/ca-certificates/opera/ca.crt"
+        - command: update-ca-certificates
+      when: ansible_distribution == "Ubuntu"        
+
+    - name: Generate certificates for communication with the registry and clean up
+      block:
+        - openssl_privatekey:
+            path: "{{ cert_path }}/client.key"
+            size: 4096
+        - openssl_csr:
+            path: "{{ cert_path }}/client.csr"
+            privatekey_path: "{{ cert_path }}/client.key"
+            country_name: "{{ country_name }}"
+            organization_name: "{{ organization_name }}"
+            email_address:  "{{ email_address }}"
+            common_name: "{{ common_name }}"
+            subject_alt_name: "{{ alt_name }}"
+        - openssl_certificate:
+            path: "{{ cert_path }}/client.cert"
+            csr_path: "{{ cert_path }}/client.csr"
+            ownca_path: "{{ cert_path }}/ca.crt"
+            ownca_privatekey_path: "{{ cert_path }}/ca.key"
+            provider: "ownca"
+        - file:
+            state: absent
+            path: "{{ cert_path }}/client.csr"
+        - file:
+            state: absent
+            path: "{{ cert_path }}/ca.key"
+
+  roles:
+    - role: geerlingguy.repo-epel
+      when: ansible_distribution == "CentOS"
+    - role: geerlingguy.pip

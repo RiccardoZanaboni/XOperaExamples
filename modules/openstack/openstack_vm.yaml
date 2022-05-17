@@ -1,0 +1,155 @@
+tosca_definitions_version: tosca_simple_yaml_1_3
+
+imports:
+  - openstack_security_rule.yaml
+  - openstack_env.yaml
+
+node_types:
+
+  sodalite.nodes.OpenStack.VM:  
+    derived_from: tosca.nodes.Compute 
+    properties:  
+      network:  
+        description: OpenStack network id (network names are not accepted) 
+        type: string 
+      name:  
+        description: Name that should be given to the VM in OpenStack 
+        type: string 
+      security_groups:  
+        description: OpenStack names of the security groups to which the instance should be added.Comma separated string. 
+        type: string 
+      flavor:  
+        description: OpenStack flavor id (flavor names are not accepted) 
+        type: string 
+      image:  
+        description: OpenStack image id (image names are not accepted) 
+        type: string 
+      key_name:  
+        description: OpenStack SSH key name that should be placed on the VM 
+        type: string 
+      username:  
+        description: Username for SSH connection 
+        type: string
+      ssh_config:
+        description: Additional ssh config, to be added to default ansible_ssh_common_args
+        type: map
+        required: false
+        default: {}
+      include_exporter:
+        description: Flag to include exporter
+        type: boolean
+        default: true
+        required: false   
+      timeout:
+        description: Timeout to instantiate the VM
+        type: integer
+        default: 600
+        required: false 
+      floating_ip_pools:
+        description: Name of floating IP pool from which to choose a floating IP
+        type: list
+        default: 
+        required: false 
+      userdata:
+        description: Additional userdata applied to configure the VM
+        type: string
+        default: ""
+        required: false 
+      scheduler:
+        description: Scheduler type for batch execution
+        type: string
+        default: "batch"
+        required: false 
+        constraints:
+          - valid_values: [ "batch" ]
+      consul_server_address:
+        description: Public IPv4 address of the consul server (for the node exporter to register into)
+        type: string
+        default: ""
+        required: false
+      skydive_analyzer:
+        description: Address and Port of skydive analyzer
+        type: string
+        default: ""
+        required: false
+      env:
+        description: Optional OpenStack environment
+        type: map
+        entry_schema:
+          type: sodalite.datatypes.OpenStack.env
+        required: false
+        default: null
+      monitoring_id:
+        description: Monitoring ID set by the IDE that identifies the deployment
+        type: string
+        required: false
+        default: "no_monitoring_id"
+      deployment_label:
+        description: Deployment label set by the user to identify the deployment
+        type: string
+        required: false
+        default: "no_deployment_label"
+      additional_public_key:
+        description: Additional public key that is added to VM authorized_keys. No new OpenStack keypair is created.
+        type: string
+        required: false
+        default: ""
+    attributes:  
+      id:  
+        description: OpenStack id of the VM 
+        type: string 
+      ansible_ip:  
+        description: ansible ipv4 
+        type: string 
+      public_address:
+        type: string
+        description: Public ipv4
+    requirements:  
+      - protected_by:  
+          relationship: tosca.relationships.DependsOn 
+          node: sodalite.nodes.OpenStack.SecurityRules 
+          capability: tosca.capabilities.Node 
+          occurrences: [0, UNBOUNDED]
+    capabilities:  
+      feature:  
+        type: tosca.capabilities.Node 
+    interfaces:  
+      Standard:  
+        type: tosca.interfaces.node.lifecycle.Standard 
+        operations:
+          create:  
+            inputs:
+              network:                  { type: string,  default: { get_property:  [ SELF, network               ] } } 
+              flavor:                   { type: string,  default: { get_property:  [ SELF, flavor                ] } } 
+              key_name:                 { type: string,  default: { get_property:  [ SELF, key_name              ] } } 
+              image:                    { type: string,  default: { get_property:  [ SELF, image                 ] } } 
+              security_groups:          { type: string,  default: { get_property:  [ SELF, security_groups       ] } } 
+              vm_name:                  { type: string,  default: { get_property:  [ SELF, name                  ] } } 
+              ansible_user:             { type: string,  default: { get_property:  [ SELF, username              ] } } 
+              ssh_config:               { type: string,  default: { get_property:  [ SELF, ssh_config            ] } }
+              include_exporter:         { type: boolean, default: { get_property:  [ SELF, include_exporter      ] } }
+              timeout:                  { type: integer, default: { get_property:  [ SELF, timeout               ] } } 
+              floating_ip_pools:        { type: list,    default: { get_property:  [ SELF, floating_ip_pools     ] } }
+              userdata:                 { type: string,  default: { get_property:  [ SELF, userdata              ] } } 
+              env:                      { type: map,     default: { get_property:  [ SELF, env                   ] } } 
+              consul_server_address:    { type: string,  default: { get_property:  [ SELF, consul_server_address ] } }
+              skydive_analyzer:         { type: string,  default: { get_property:  [ SELF, skydive_analyzer      ] } }
+              deployment_label:         { type: string,  default: { get_property:  [ SELF, deployment_label      ] } }
+              monitoring_id:            { type: string,  default: { get_property:  [ SELF, monitoring_id         ] } }
+              additional_public_key:    { type: string,  default: { get_property:  [ SELF, additional_public_key ] } }
+              instance_name:            { type: string,  default: { get_attribute: [ SELF, tosca_name            ] } }
+            implementation: 
+              primary: playbooks/vm_create.yml 
+              dependencies:
+                - playbooks/egi_refresh_token.yml
+                - artifacts/node_exporter.service.j2
+          delete:  
+            inputs:  
+              id:                       { type: string, default: { get_attribute: [ SELF, id                    ] } } 
+              env:                      { type: map,    default: { get_property:  [ SELF, env                   ] } }
+              monitoring_id:            { type: string, default: { get_property:  [ SELF, monitoring_id         ] } }
+              consul_server_address:    { type: string, default: { get_property:  [ SELF, consul_server_address ] } }
+            implementation: 
+              primary: playbooks/vm_delete.yml 
+              dependencies:
+                - playbooks/egi_refresh_token.yml
